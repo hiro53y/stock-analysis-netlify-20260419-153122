@@ -1,0 +1,44 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+  included_files = ["shared/**"]
+
+[dev]
+  publish = "dist"
+  targetPort = 5173
+  autoLaunch = false
+
+[[redirects]]
+  from = "/api/healthz"
+  to = "/.netlify/functions/healthz"
+  status = 200
+
+[[redirects]]
+  from = "/api/market-data/:symbol"
+  to = "/.netlify/functions/market-data?symbol=:symbol"
+  status = 200
+
+[[redirects]]
+  from = "/api/analyses"
+  to = "/.netlify/functions/analyses"
+  status = 200
+
+[[redirects]]
+  from = "/api/analyses/:id"
+  to = "/.netlify/functions/analysis-status?id=:id"
+  status = 200
+
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Content-Type = "application/manifest+json"
+    Cache-Control = "public, max-age=3600"
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"
