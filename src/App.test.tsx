@@ -118,9 +118,7 @@ describe('App', () => {
   it('初期メッセージを表示する', () => {
     render(<App />)
 
-    expect(
-      screen.getByRole('heading', { name: 'Androidで使える株価分析Webアプリ' }),
-    ).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '株価分析Webアプリ' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '分析を実行' })).toBeInTheDocument()
   })
 

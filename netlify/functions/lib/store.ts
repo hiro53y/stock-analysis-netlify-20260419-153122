@@ -15,8 +15,35 @@ interface CachedAnalysisEnvelope {
   result: AnalysisResult
 }
 
-const FALLBACK_ROOT = path.resolve(process.cwd(), 'runtime', 'local-store')
+const NETLIFY_TASK_ROOT = '/var/task'
+const NETLIFY_TMP_RUNTIME_ROOT = '/tmp/runtime'
 const runningOnHostedNetlify = Boolean(process.env.NETLIFY && !process.env.NETLIFY_LOCAL)
+
+function shouldUseNetlifyTmpRuntime(): boolean {
+  if (process.env.NETLIFY_LOCAL) {
+    return false
+  }
+
+  const currentWorkingDirectory = process.cwd()
+  const lambdaTaskRoot = process.env.LAMBDA_TASK_ROOT ?? ''
+
+  return (
+    currentWorkingDirectory.startsWith(NETLIFY_TASK_ROOT) ||
+    lambdaTaskRoot.startsWith(NETLIFY_TASK_ROOT)
+  )
+}
+
+export function resolveRuntimeRoot(): string {
+  return shouldUseNetlifyTmpRuntime()
+    ? NETLIFY_TMP_RUNTIME_ROOT
+    : path.resolve(process.cwd(), 'runtime')
+}
+
+export function resolveFallbackRoot(): string {
+  return shouldUseNetlifyTmpRuntime()
+    ? path.posix.join(NETLIFY_TMP_RUNTIME_ROOT, 'local-store')
+    : path.resolve(resolveRuntimeRoot(), 'local-store')
+}
 
 function getMemoryStores(): MemoryStores {
   const scoped = globalThis as typeof globalThis & {
@@ -39,7 +66,7 @@ function getMemoryStore(name: string): Map<string, unknown> {
 }
 
 function getFallbackFilePath(storeName: string, key: string): string {
-  return path.join(FALLBACK_ROOT, storeName, `${encodeURIComponent(key)}.json`)
+  return path.join(resolveFallbackRoot(), storeName, `${encodeURIComponent(key)}.json`)
 }
 
 async function getFileJson<T>(storeName: string, key: string): Promise<T | null> {

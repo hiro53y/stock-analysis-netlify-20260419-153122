@@ -182,7 +182,7 @@ export default function App() {
   const isSubmitting = status === 'queued' || status === 'running'
 
   const headerText = useMemo(() => {
-    if (!result) return 'Androidで使える株価分析Webアプリ'
+    if (!result) return '株価分析Webアプリ'
     return `${result.companyName} / ${result.normalizedSymbol}`
   }, [result])
 
