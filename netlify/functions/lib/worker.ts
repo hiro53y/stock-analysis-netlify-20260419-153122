@@ -1,7 +1,7 @@
 import { analyzeMarketData } from '../../../shared/analysis/engine'
 import { normalizeSymbol, getMarketData } from './market-data'
 import { clearInFlightAnalysis, getCachedAnalysis, setCachedAnalysis, updateJob } from './store'
-import type { AnalysisRequestPayload } from '../../../shared/types'
+import type { AnalysisRequestPayload, AnalysisResult } from '../../../shared/types'
 
 export interface WorkerPayload {
   analysisId: string
@@ -9,7 +9,7 @@ export interface WorkerPayload {
   request: AnalysisRequestPayload
 }
 
-export async function runAnalysisWorker(payload: WorkerPayload): Promise<void> {
+export async function runAnalysisWorker(payload: WorkerPayload): Promise<AnalysisResult> {
   try {
     const normalized = normalizeSymbol(payload.request.symbol, payload.request.market)
     await updateJob(payload.analysisId, {
@@ -29,7 +29,7 @@ export async function runAnalysisWorker(payload: WorkerPayload): Promise<void> {
         cached: true,
         result: cached,
       })
-      return
+      return cached
     }
 
     const marketData = await getMarketData(payload.request.symbol, payload.request.market)
@@ -59,6 +59,7 @@ export async function runAnalysisWorker(payload: WorkerPayload): Promise<void> {
       progressMessage: '分析が完了しました。',
       result,
     })
+    return result
   } finally {
     await clearInFlightAnalysis(payload.cacheKey).catch(() => {})
   }

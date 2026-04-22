@@ -6,7 +6,6 @@ import type { AnalysisJobRecord, AnalysisResult } from '../../../shared/types'
 
 type MemoryStores = Map<string, Map<string, unknown>>
 type StorageMode =
-  | 'blobs-required'
   | 'blobs-with-filesystem-fallback'
   | 'filesystem-fallback'
 
@@ -17,7 +16,14 @@ interface CachedAnalysisEnvelope {
 
 const NETLIFY_TASK_ROOT = '/var/task'
 const NETLIFY_TMP_RUNTIME_ROOT = '/tmp/runtime'
-const runningOnHostedNetlify = Boolean(process.env.NETLIFY && !process.env.NETLIFY_LOCAL)
+
+function isRunningOnHostedNetlify(): boolean {
+  return Boolean(process.env.NETLIFY && !process.env.NETLIFY_LOCAL)
+}
+
+function prefersBlobStore(): boolean {
+  return Boolean(process.env.NETLIFY || process.env.NETLIFY_LOCAL)
+}
 
 function shouldUseNetlifyTmpRuntime(): boolean {
   if (process.env.NETLIFY_LOCAL) {
@@ -102,53 +108,82 @@ function createBlobsUnavailableError(): Error {
   return new Error('Netlify Blobs に接続できません。サイト設定と環境変数を確認してください。')
 }
 
-async function getJson<T>(storeName: string, key: string): Promise<T | null> {
-  try {
-    const store = getStore(storeName)
-    return (await store.get(key, { type: 'json' })) as T | null
-  } catch {
-    if (runningOnHostedNetlify) {
-      throw createBlobsUnavailableError()
-    }
-
-    return getFileJson<T>(storeName, key)
+async function canUseBlobStore(): Promise<boolean> {
+  if (!isRunningOnHostedNetlify()) {
+    return true
   }
-}
 
-async function setJson<T>(storeName: string, key: string, value: T): Promise<void> {
+  const key = `blob-probe:${Date.now()}`
+
   try {
-    const store = getStore(storeName)
-    await store.setJSON(key, value)
-    return
-  } catch {
-    if (runningOnHostedNetlify) {
-      throw createBlobsUnavailableError()
-    }
-
-    await setFileJson(storeName, key, value)
-  }
-}
-
-async function deleteJson(storeName: string, key: string): Promise<void> {
-  try {
-    const store = getStore(storeName)
+    const store = getStore('healthz-probe')
+    await store.setJSON(key, { checkedAt: new Date().toISOString() })
+    const value = await store.get(key, { type: 'json' })
     const deletableStore = store as typeof store & {
       delete?: (entryKey: string) => Promise<unknown>
     }
 
     if (typeof deletableStore.delete === 'function') {
       await deletableStore.delete(key)
-      return
     }
+
+    return Boolean(value)
   } catch {
-    if (runningOnHostedNetlify) {
-      throw createBlobsUnavailableError()
+    return false
+  }
+}
+
+async function getJson<T>(storeName: string, key: string): Promise<T | null> {
+  if (prefersBlobStore()) {
+    try {
+      const store = getStore(storeName)
+      return (await store.get(key, { type: 'json' })) as T | null
+    } catch {
+      if (isRunningOnHostedNetlify()) {
+        console.warn(createBlobsUnavailableError().message)
+      }
     }
   }
 
-  if (!runningOnHostedNetlify) {
-    await deleteFileJson(storeName, key)
+  return getFileJson<T>(storeName, key)
+}
+
+async function setJson<T>(storeName: string, key: string, value: T): Promise<void> {
+  if (prefersBlobStore()) {
+    try {
+      const store = getStore(storeName)
+      await store.setJSON(key, value)
+      return
+    } catch {
+      if (isRunningOnHostedNetlify()) {
+        console.warn(createBlobsUnavailableError().message)
+      }
+    }
   }
+
+  await setFileJson(storeName, key, value)
+}
+
+async function deleteJson(storeName: string, key: string): Promise<void> {
+  if (prefersBlobStore()) {
+    try {
+      const store = getStore(storeName)
+      const deletableStore = store as typeof store & {
+        delete?: (entryKey: string) => Promise<unknown>
+      }
+
+      if (typeof deletableStore.delete === 'function') {
+        await deletableStore.delete(key)
+        return
+      }
+    } catch {
+      if (isRunningOnHostedNetlify()) {
+        console.warn(createBlobsUnavailableError().message)
+      }
+    }
+  }
+
+  await deleteFileJson(storeName, key)
 }
 
 function isCachedAnalysisEnvelope(value: unknown): value is CachedAnalysisEnvelope {
@@ -253,12 +288,24 @@ export async function clearInFlightAnalysis(cacheKey: string): Promise<void> {
   await deleteJson('analysis-inflight', cacheKey)
 }
 
-export function getStorageMode(): StorageMode {
-  if (runningOnHostedNetlify) {
-    return 'blobs-required'
+export async function canUseBackgroundProcessing(): Promise<boolean> {
+  if (!isRunningOnHostedNetlify()) {
+    return true
   }
 
-  return process.env.NETLIFY_LOCAL
+  return canUseBlobStore()
+}
+
+async function getStorageMode(): Promise<StorageMode> {
+  if (process.env.NETLIFY_LOCAL) {
+    return 'blobs-with-filesystem-fallback'
+  }
+
+  if (!prefersBlobStore()) {
+    return 'filesystem-fallback'
+  }
+
+  return (await canUseBackgroundProcessing())
     ? 'blobs-with-filesystem-fallback'
     : 'filesystem-fallback'
 }
@@ -266,9 +313,11 @@ export function getStorageMode(): StorageMode {
 export async function probeStorage(): Promise<{
   ok: boolean
   mode: StorageMode
+  backgroundProcessing: boolean
   error?: string
 }> {
-  const mode = getStorageMode()
+  const backgroundProcessing = await canUseBackgroundProcessing()
+  const mode = await getStorageMode()
   const key = `healthz:${Date.now()}`
 
   try {
@@ -278,11 +327,13 @@ export async function probeStorage(): Promise<{
     return {
       ok: true,
       mode,
+      backgroundProcessing,
     }
   } catch (error) {
     return {
       ok: false,
       mode,
+      backgroundProcessing,
       error: error instanceof Error ? error.message : 'storage probe failed',
     }
   }

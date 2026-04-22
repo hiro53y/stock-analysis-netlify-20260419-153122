@@ -6,6 +6,7 @@ import { errorResponseFromUnknown, getClientIp, jsonResponse } from './lib/http'
 import { normalizeSymbol } from './lib/market-data'
 import { enforceRateLimit } from './lib/rate-limit'
 import {
+  canUseBackgroundProcessing,
   clearInFlightAnalysis,
   getCachedAnalysis,
   getInFlightAnalysis,
@@ -14,6 +15,7 @@ import {
   setJob,
   updateJob,
 } from './lib/store'
+import { runAnalysisWorker } from './lib/worker'
 
 export default async (request: Request): Promise<Response> => {
   if (request.method !== 'POST') {
@@ -75,27 +77,38 @@ export default async (request: Request): Promise<Response> => {
 
     await setJob(job)
     let finalStatus = job.status
+    let immediateResult = cached ?? undefined
 
     if (!cached) {
-      await setInFlightAnalysis(cacheKey, analysisId)
       try {
-        const backgroundUrl = new URL('/.netlify/functions/analysis-worker-background', request.url)
-        const response = await fetch(backgroundUrl, {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-          },
-          body: JSON.stringify({
+        if (await canUseBackgroundProcessing()) {
+          await setInFlightAnalysis(cacheKey, analysisId)
+
+          const backgroundUrl = new URL('/.netlify/functions/analysis-worker-background', request.url)
+          const response = await fetch(backgroundUrl, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              analysisId,
+              cacheKey,
+              dispatchKey,
+              request: input,
+            }),
+          })
+
+          if (!response.ok) {
+            const detail = await response.text().catch(() => '')
+            throw new Error(detail || 'バックグラウンド処理の起動に失敗しました。')
+          }
+        } else {
+          immediateResult = await runAnalysisWorker({
             analysisId,
             cacheKey,
-            dispatchKey,
             request: input,
-          }),
-        })
-
-        if (!response.ok) {
-          const detail = await response.text().catch(() => '')
-          throw new Error(detail || 'バックグラウンド処理の起動に失敗しました。')
+          })
+          finalStatus = 'completed'
         }
       } catch (backgroundError) {
         await updateJob(analysisId, {
@@ -116,6 +129,7 @@ export default async (request: Request): Promise<Response> => {
       analysisId,
       status: finalStatus,
       cached: job.cached,
+      result: finalStatus === 'completed' ? immediateResult : undefined,
     }
 
     return jsonResponse(payload, 202)

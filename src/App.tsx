@@ -51,6 +51,14 @@ function StatusBanner({
   )
 }
 
+function readOfflineState(): boolean {
+  if (typeof navigator === 'undefined') {
+    return false
+  }
+
+  return navigator.onLine === false
+}
+
 export default function App() {
   const [form, setForm] = useState<AnalysisRequestPayload>(buildInitialForm())
   const [analysisId, setAnalysisId] = useState<string | null>(null)
@@ -62,7 +70,20 @@ export default function App() {
   const [result, setResult] = useState<AnalysisResult | null>(() => loadLastResult())
   const [preview, setPreview] = useState<MarketDataResponse | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
-  const [usingOfflineResult, setUsingOfflineResult] = useState(() => Boolean(loadLastResult()))
+  const [isOffline, setIsOffline] = useState(() => readOfflineState())
+
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false)
+    const handleOffline = () => setIsOffline(true)
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
 
   useEffect(() => {
     if (!form.symbol || !validateSymbolInput(form.symbol)) {
@@ -139,7 +160,6 @@ export default function App() {
         if (snapshot.result) {
           setResult(snapshot.result)
           persistLastResult(snapshot.result)
-          setUsingOfflineResult(false)
         }
 
         if (snapshot.status === 'completed' || snapshot.status === 'error') {
@@ -191,15 +211,28 @@ export default function App() {
 
     try {
       setError(null)
+      setAnalysisId(null)
+      setResult(null)
+      setActiveTab('overview')
       setProgress(0)
       setProgressMessage('分析ジョブを起動しています...')
       setStatus('queued')
-      setUsingOfflineResult(false)
       const created = await startAnalysis(form)
       const nextAnalysisId = created.analysisId?.trim()
       if (!nextAnalysisId) {
         console.error('analysisId missing after startAnalysis', created)
         throw new Error('分析開始レスポンスに analysisId がありません。')
+      }
+
+      if (created.result) {
+        setStatus(created.status)
+        setProgress(100)
+        setProgressMessage(
+          created.cached ? 'キャッシュ済み結果を返しました。' : '分析が完了しました。',
+        )
+        setResult(created.result)
+        persistLastResult(created.result)
+        return
       }
 
       setAnalysisId(nextAnalysisId)
@@ -245,7 +278,7 @@ export default function App() {
         />
 
         <section className="content-column">
-          {usingOfflineResult && result ? (
+          {isOffline && result ? (
             <section className="panel offline-panel">
               <p className="eyebrow">オフライン表示</p>
               <h2>直近成功結果を表示中</h2>

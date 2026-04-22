@@ -142,6 +142,7 @@ export interface AnalysisCreateResponse {
   analysisId: string
   status: JobStatus
   cached: boolean
+  result?: AnalysisResult
 }
 
 export interface AnalysisStatusResponse {

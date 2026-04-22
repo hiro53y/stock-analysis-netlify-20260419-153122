@@ -1,5 +1,6 @@
-const CACHE_NAME = 'stock-analysis-shell-v2'
+const CACHE_NAME = 'stock-analysis-shell-v3'
 const APP_SHELL = ['/', '/manifest.webmanifest', '/icons/icon-192.svg', '/icons/icon-512.svg']
+const ASSET_LINK_PATTERN = /(?:src|href)=["']([^"']+)["']/g
 
 function isSameOrigin(url) {
   return url.origin === self.location.origin
@@ -13,9 +14,35 @@ function isNavigationRequest(request) {
   return request.mode === 'navigate' || request.headers.get('accept')?.includes('text/html')
 }
 
+function normalizeSameOriginPath(entry) {
+  try {
+    const url = new URL(entry, self.location.origin)
+    if (!isSameOrigin(url)) {
+      return null
+    }
+
+    return `${url.pathname}${url.search}`
+  } catch {
+    return null
+  }
+}
+
+async function warmAppShell(cache) {
+  const response = await fetch('/', { cache: 'no-cache' })
+  const html = await response.text()
+  const discoveredAssets = Array.from(html.matchAll(ASSET_LINK_PATTERN))
+    .map(([, assetPath]) => normalizeSameOriginPath(assetPath))
+    .filter((assetPath) => assetPath && assetPath !== '/')
+
+  const shellEntries = Array.from(new Set([...APP_SHELL, ...discoveredAssets]))
+  await cache.addAll(shellEntries)
+}
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)),
+    caches.open(CACHE_NAME).then((cache) =>
+      warmAppShell(cache).catch(() => cache.addAll(APP_SHELL)),
+    ),
   )
   self.skipWaiting()
 })

@@ -25,6 +25,13 @@ vi.mock('./lib/api', () => apiMocks)
 
 import App from './App'
 
+function setNavigatorOnline(value: boolean) {
+  Object.defineProperty(window.navigator, 'onLine', {
+    configurable: true,
+    value,
+  })
+}
+
 function createPreview(): MarketDataResponse {
   return {
     symbol: '7203',
@@ -36,8 +43,8 @@ function createPreview(): MarketDataResponse {
   }
 }
 
-function createResult(): AnalysisResult {
-  return {
+function createResult(overrides: Partial<AnalysisResult> = {}): AnalysisResult {
+  const base: AnalysisResult = {
     analysisId: 'analysis-1',
     request: {
       symbol: '7203',
@@ -88,11 +95,21 @@ function createResult(): AnalysisResult {
     riskFlags: [],
     progressSteps: [],
   }
+
+  return {
+    ...base,
+    ...overrides,
+    request: {
+      ...base.request,
+      ...(overrides.request ?? {}),
+    },
+  }
 }
 
 describe('App', () => {
   beforeEach(() => {
     localStorage.clear()
+    setNavigatorOnline(true)
     apiMocks.buildInitialForm.mockReturnValue({
       symbol: '7203',
       market: 'auto',
@@ -112,6 +129,7 @@ describe('App', () => {
 
   afterEach(() => {
     vi.clearAllMocks()
+    vi.restoreAllMocks()
     vi.useRealTimers()
   })
 
@@ -158,12 +176,27 @@ describe('App', () => {
   })
 
   it('保存済み結果があってもタイトルは固定表示のまま', () => {
-    apiMocks.loadLastResult.mockReturnValue(createResult())
+    const savedResult = createResult({
+      analysisId: 'analysis-5451',
+      request: {
+        symbol: '5451',
+        market: 'JP',
+        buyThreshold: 0.7,
+        sellThreshold: 0.3,
+      },
+      symbol: '5451',
+      normalizedSymbol: '5451.T',
+      companyName: '淀川製鋼所',
+    })
+    apiMocks.buildInitialForm.mockReturnValue(savedResult.request)
+    apiMocks.loadLastResult.mockReturnValue(savedResult)
 
     render(<App />)
 
     expect(screen.getByRole('heading', { name: '株式意思決定支援アプリ' })).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'トヨタ自動車 / 7203.T' })).not.toBeInTheDocument()
+    expect(screen.getByDisplayValue('5451')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('JP')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '淀川製鋼所 / 5451.T' })).not.toBeInTheDocument()
   })
 
   it('404 の終端エラーでは再試行を止めて error 状態にする', async () => {
@@ -186,9 +219,44 @@ describe('App', () => {
     expect(apiMocks.fetchAnalysisStatus).toHaveBeenCalledTimes(1)
   })
 
-  it('保存済み結果があっても再分析開始時にオフラインバナーを消す', async () => {
-    const user = userEvent.setup()
+  it('オンライン時は保存済み結果があってもオフラインバナーを出さない', () => {
     apiMocks.loadLastResult.mockReturnValue(createResult())
+
+    render(<App />)
+
+    expect(screen.queryByText('直近成功結果を表示中')).not.toBeInTheDocument()
+  })
+
+  it('オフライン時のみ保存済み結果バナーを表示する', async () => {
+    apiMocks.loadLastResult.mockReturnValue(createResult())
+
+    render(<App />)
+
+    act(() => {
+      setNavigatorOnline(false)
+      window.dispatchEvent(new Event('offline'))
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('直近成功結果を表示中')).toBeInTheDocument()
+    })
+  })
+
+  it('再分析開始時に古い結果パネルを消してから新しい状態を待つ', async () => {
+    const user = userEvent.setup()
+    const savedResult = createResult({
+      companyName: '保存済み結果株式会社',
+      normalizedSymbol: '5451.T',
+      symbol: '5451',
+      request: {
+        symbol: '5451',
+        market: 'auto',
+        buyThreshold: 0.6,
+        sellThreshold: 0.4,
+      },
+    })
+    apiMocks.buildInitialForm.mockReturnValue(savedResult.request)
+    apiMocks.loadLastResult.mockReturnValue(savedResult)
     apiMocks.fetchAnalysisStatus.mockResolvedValue({
       status: 'running',
       progress: 10,
@@ -198,12 +266,13 @@ describe('App', () => {
 
     render(<App />)
 
-    expect(screen.getByText('直近成功結果を表示中')).toBeInTheDocument()
+    expect(screen.getByText('保存済み結果株式会社')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '分析を実行' }))
 
     await waitFor(() => {
-      expect(screen.queryByText('直近成功結果を表示中')).not.toBeInTheDocument()
+      expect(screen.queryByText('保存済み結果株式会社')).not.toBeInTheDocument()
+      expect(screen.getByText('分析中です。')).toBeInTheDocument()
     })
   })
 
@@ -257,5 +326,28 @@ describe('App', () => {
     })
 
     expect(screen.getByText('分析がタイムアウトしました。しばらく待ってから再度お試しください。')).toBeInTheDocument()
+  })
+
+  it('開始レスポンスに completed result が含まれる場合はポーリングせず即時反映する', async () => {
+    const user = userEvent.setup()
+    apiMocks.startAnalysis.mockResolvedValue({
+      analysisId: 'analysis-inline',
+      status: 'completed',
+      cached: false,
+      result: createResult({
+        analysisId: 'analysis-inline',
+        companyName: '即時完了銘柄',
+        normalizedSymbol: 'INLINE.T',
+      }),
+    })
+
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: '分析を実行' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('即時完了銘柄')).toBeInTheDocument()
+    })
+    expect(apiMocks.fetchAnalysisStatus).not.toHaveBeenCalled()
   })
 })

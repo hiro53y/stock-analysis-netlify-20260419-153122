@@ -10,11 +10,16 @@ export default async (): Promise<Response> => {
       netlify: Boolean(process.env.NETLIFY || process.env.NETLIFY_LOCAL),
     },
     netlify: {
-      backgroundFunctionsConfigured: true,
-      redirectsConfigured: true,
+      backgroundFunctionsVerified: false,
+      redirectsVerified: false,
+      verificationNotes: {
+        backgroundFunctions: 'healthz では background function の起動可否を実行確認していません。',
+        redirects: 'healthz では redirect の到達性を実行確認していません。',
+      },
     },
     storage: {
       mode: storage.mode,
+      backgroundProcessing: storage.backgroundProcessing,
       error: storage.error,
     },
     cache: {

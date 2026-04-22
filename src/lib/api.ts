@@ -16,14 +16,6 @@ const signalSchema = z.enum(['BUY', 'WATCH', 'SELL', 'UNKNOWN'])
 const marketSchema = z.enum(['auto', 'JP', 'US'])
 const resolvedMarketSchema = z.enum(['JP', 'US'])
 const jobStatusSchema = z.enum(['queued', 'running', 'completed', 'error'])
-const analysisCreateResponseSchema = z.object({
-  analysisId: z.string().optional(),
-  id: z.string().optional(),
-  jobId: z.string().optional(),
-  status: jobStatusSchema,
-  cached: z.boolean(),
-})
-
 const analysisResultStorageSchema = z.object({
   analysisId: z.string(),
   request: z.object({
@@ -154,6 +146,15 @@ const analysisResultStorageSchema = z.object({
   progressSteps: z.array(z.string()),
 })
 
+const analysisCreateResponseSchema = z.object({
+  analysisId: z.string().optional(),
+  id: z.string().optional(),
+  jobId: z.string().optional(),
+  status: jobStatusSchema,
+  cached: z.boolean(),
+  result: analysisResultStorageSchema.optional(),
+})
+
 export class ApiError extends Error {
   status: number
 
@@ -193,6 +194,7 @@ function normalizeAnalysisCreateResponse(rawPayload: unknown): AnalysisCreateRes
     analysisId,
     status: parsed.data.status,
     cached: parsed.data.cached,
+    result: parsed.data.result,
   }
 }
 
@@ -259,5 +261,10 @@ export function loadLastResult(): AnalysisResult | null {
 }
 
 export function buildInitialForm(): AnalysisRequestPayload {
+  const lastResult = loadLastResult()
+  if (lastResult) {
+    return { ...lastResult.request }
+  }
+
   return { ...DEFAULT_ANALYSIS_INPUT }
 }

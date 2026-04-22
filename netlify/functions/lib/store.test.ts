@@ -9,6 +9,7 @@ vi.mock('@netlify/blobs', () => ({
 }))
 
 import {
+  canUseBackgroundProcessing,
   getCachedAnalysis,
   getGenericStoreValue,
   resolveFallbackRoot,
@@ -24,6 +25,7 @@ describe('store fallback', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-19T00:00:00.000Z'))
     delete process.env.LAMBDA_TASK_ROOT
+    delete process.env.NETLIFY
     delete process.env.NETLIFY_LOCAL
     await rm(path.join(fallbackRoot, 'test-store'), { force: true, recursive: true }).catch(() => {})
     await rm(path.join(fallbackRoot, 'analysis-cache'), { force: true, recursive: true }).catch(() => {})
@@ -32,6 +34,7 @@ describe('store fallback', () => {
   afterEach(async () => {
     vi.useRealTimers()
     delete process.env.LAMBDA_TASK_ROOT
+    delete process.env.NETLIFY
     delete process.env.NETLIFY_LOCAL
     await rm(path.join(fallbackRoot, 'test-store'), { force: true, recursive: true }).catch(() => {})
     await rm(path.join(fallbackRoot, 'analysis-cache'), { force: true, recursive: true }).catch(() => {})
@@ -50,6 +53,19 @@ describe('store fallback', () => {
     await expect(getGenericStoreValue<{ status: string }>('test-store', 'job:1')).resolves.toEqual({
       status: 'queued',
     })
+  })
+
+  it('Hosted Netlify でも Blobs が使えない場合は filesystem fallback と同期実行へ切り替える', async () => {
+    process.env.NETLIFY = 'true'
+
+    await expect(canUseBackgroundProcessing()).resolves.toBe(false)
+
+    await setGenericStoreValue('test-store', 'job:hosted', { status: 'running' })
+
+    await expect(getGenericStoreValue<{ status: string }>('test-store', 'job:hosted')).resolves.toEqual({
+      status: 'running',
+    })
+    expect(resolveFallbackRoot()).toBe(fallbackRoot)
   })
 
   it('分析結果キャッシュは TTL 超過後に無効化される', async () => {
