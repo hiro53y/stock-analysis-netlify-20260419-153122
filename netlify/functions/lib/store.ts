@@ -17,12 +17,25 @@ interface CachedAnalysisEnvelope {
 const NETLIFY_TASK_ROOT = '/var/task'
 const NETLIFY_TMP_RUNTIME_ROOT = '/tmp/runtime'
 
+function hasNetlifyFunctionRuntimeMetadata(): boolean {
+  return Boolean(process.env.SITE_ID || process.env.SITE_NAME || process.env.URL)
+}
+
 function isRunningOnHostedNetlify(): boolean {
-  return Boolean(process.env.NETLIFY && !process.env.NETLIFY_LOCAL)
+  if (process.env.NETLIFY_LOCAL) {
+    return false
+  }
+
+  return shouldUseNetlifyTmpRuntime() || hasNetlifyFunctionRuntimeMetadata()
 }
 
 function prefersBlobStore(): boolean {
-  return Boolean(process.env.NETLIFY || process.env.NETLIFY_LOCAL)
+  return Boolean(
+    process.env.NETLIFY_LOCAL ||
+      process.env.NETLIFY ||
+      hasNetlifyFunctionRuntimeMetadata() ||
+      shouldUseNetlifyTmpRuntime(),
+  )
 }
 
 function shouldUseNetlifyTmpRuntime(): boolean {

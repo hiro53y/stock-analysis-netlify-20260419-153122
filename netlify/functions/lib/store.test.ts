@@ -27,6 +27,9 @@ describe('store fallback', () => {
     delete process.env.LAMBDA_TASK_ROOT
     delete process.env.NETLIFY
     delete process.env.NETLIFY_LOCAL
+    delete process.env.SITE_ID
+    delete process.env.SITE_NAME
+    delete process.env.URL
     await rm(path.join(fallbackRoot, 'test-store'), { force: true, recursive: true }).catch(() => {})
     await rm(path.join(fallbackRoot, 'analysis-cache'), { force: true, recursive: true }).catch(() => {})
   })
@@ -36,6 +39,9 @@ describe('store fallback', () => {
     delete process.env.LAMBDA_TASK_ROOT
     delete process.env.NETLIFY
     delete process.env.NETLIFY_LOCAL
+    delete process.env.SITE_ID
+    delete process.env.SITE_NAME
+    delete process.env.URL
     await rm(path.join(fallbackRoot, 'test-store'), { force: true, recursive: true }).catch(() => {})
     await rm(path.join(fallbackRoot, 'analysis-cache'), { force: true, recursive: true }).catch(() => {})
   })
@@ -56,7 +62,7 @@ describe('store fallback', () => {
   })
 
   it('Hosted Netlify でも Blobs が使えない場合は filesystem fallback と同期実行へ切り替える', async () => {
-    process.env.NETLIFY = 'true'
+    process.env.SITE_ID = 'site-123'
 
     await expect(canUseBackgroundProcessing()).resolves.toBe(false)
 
@@ -66,6 +72,18 @@ describe('store fallback', () => {
       status: 'running',
     })
     expect(resolveFallbackRoot()).toBe(fallbackRoot)
+  })
+
+  it('NETLIFY が無くても Netlify runtime metadata があれば hosted 判定する', async () => {
+    process.env.URL = 'https://example-site.netlify.app'
+
+    await expect(canUseBackgroundProcessing()).resolves.toBe(false)
+
+    await setGenericStoreValue('test-store', 'job:runtime-metadata', { status: 'queued' })
+
+    await expect(getGenericStoreValue<{ status: string }>('test-store', 'job:runtime-metadata')).resolves.toEqual({
+      status: 'queued',
+    })
   })
 
   it('分析結果キャッシュは TTL 超過後に無効化される', async () => {
