@@ -118,7 +118,7 @@ describe('App', () => {
   it('初期メッセージを表示する', () => {
     render(<App />)
 
-    expect(screen.getByRole('heading', { name: '株価分析Webアプリ' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '株式意思決定支援アプリ' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '分析を実行' })).toBeInTheDocument()
   })
 
@@ -150,13 +150,20 @@ describe('App', () => {
       expect(apiMocks.fetchAnalysisStatus).toHaveBeenCalledTimes(2)
     }, { timeout: 3500 })
     await waitFor(() => {
-      expect(
-        screen.getByRole('heading', { name: 'トヨタ自動車 / 7203.T' }),
-      ).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: '株式意思決定支援アプリ' })).toBeInTheDocument()
     })
     await waitFor(() => {
       expect(screen.queryByText('一時的に取得できませんでした。')).not.toBeInTheDocument()
     })
+  })
+
+  it('保存済み結果があってもタイトルは固定表示のまま', () => {
+    apiMocks.loadLastResult.mockReturnValue(createResult())
+
+    render(<App />)
+
+    expect(screen.getByRole('heading', { name: '株式意思決定支援アプリ' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'トヨタ自動車 / 7203.T' })).not.toBeInTheDocument()
   })
 
   it('404 の終端エラーでは再試行を止めて error 状態にする', async () => {

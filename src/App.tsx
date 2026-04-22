@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { DEFAULT_ANALYSIS_INPUT } from '../shared/constants'
 import type { AnalysisRequestPayload, AnalysisResult, AnalysisStatusResponse, MarketDataResponse } from '../shared/types'
 import { analysisRequestSchema, validateSymbolInput } from '../shared/validation'
@@ -181,11 +181,6 @@ export default function App() {
 
   const isSubmitting = status === 'queued' || status === 'running'
 
-  const headerText = useMemo(() => {
-    if (!result) return '株価分析Webアプリ'
-    return `${result.companyName} / ${result.normalizedSymbol}`
-  }, [result])
-
   const handleSubmit = async () => {
     const validation = analysisRequestSchema.safeParse(form)
     if (!validation.success) {
@@ -228,7 +223,7 @@ export default function App() {
       <header className="hero-shell">
         <div className="hero-copy">
           <p className="eyebrow">Netlify / PWA / Mobile First</p>
-          <h1>{headerText}</h1>
+          <h1>株式意思決定支援アプリ</h1>
           <p>
             デスクトップ版の主要体験を、Android で操作しやすい Web アプリに再構成しています。
           </p>
