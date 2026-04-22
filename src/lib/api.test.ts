@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchAnalysisStatus, loadLastResult, persistLastResult } from './api'
+import { fetchAnalysisStatus, loadLastResult, persistLastResult, startAnalysis } from './api'
 
 describe('api helpers', () => {
   beforeEach(() => {
@@ -22,6 +22,74 @@ describe('api helpers', () => {
       message: '見つかりません。',
       status: 404,
     })
+  })
+
+  it('startAnalysis は legacy な id フィールドを analysisId に正規化する', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ id: 'analysis-legacy', status: 'queued', cached: false }),
+      }),
+    )
+
+    await expect(
+      startAnalysis({
+        symbol: '7203',
+        market: 'auto',
+        buyThreshold: 0.6,
+        sellThreshold: 0.4,
+      }),
+    ).resolves.toEqual({
+      analysisId: 'analysis-legacy',
+      status: 'queued',
+      cached: false,
+    })
+  })
+
+  it('startAnalysis レスポンスに analysisId が無いと raw payload をログして失敗する', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ status: 'queued', cached: false }),
+      }),
+    )
+
+    await expect(
+      startAnalysis({
+        symbol: '7203',
+        market: 'auto',
+        buyThreshold: 0.6,
+        sellThreshold: 0.4,
+      }),
+    ).rejects.toMatchObject({
+      message: '分析開始レスポンスに analysisId がありません。',
+      status: 500,
+    })
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'analysisId missing in startAnalysis response',
+      { status: 'queued', cached: false },
+    )
+  })
+
+  it('fetchAnalysisStatus は analysisId を path と query の両方へ載せる', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        status: 'queued',
+        progress: 10,
+        progressMessage: '分析中です。',
+        cached: false,
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchAnalysisStatus('analysis-1')
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/analyses/analysis-1?analysisId=analysis-1', undefined)
   })
 
   it('Storage が使えない環境でも結果保存で落ちない', () => {

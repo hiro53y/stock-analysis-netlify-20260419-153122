@@ -201,7 +201,13 @@ export default function App() {
       setStatus('queued')
       setUsingOfflineResult(false)
       const created = await startAnalysis(form)
-      setAnalysisId(created.analysisId)
+      const nextAnalysisId = created.analysisId?.trim()
+      if (!nextAnalysisId) {
+        console.error('analysisId missing after startAnalysis', created)
+        throw new Error('分析開始レスポンスに analysisId がありません。')
+      }
+
+      setAnalysisId(nextAnalysisId)
       setStatus(created.status)
       setProgress(created.cached || created.status === 'error' ? 100 : 10)
       setProgressMessage(

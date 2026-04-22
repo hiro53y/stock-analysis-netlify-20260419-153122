@@ -142,6 +142,7 @@ describe('App', () => {
 
     await waitFor(() => {
       expect(apiMocks.fetchAnalysisStatus).toHaveBeenCalledTimes(1)
+      expect(apiMocks.fetchAnalysisStatus).toHaveBeenCalledWith('analysis-1')
       expect(screen.getByText('一時的に取得できませんでした。')).toBeInTheDocument()
     })
 
@@ -197,6 +198,33 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.queryByText('直近成功結果を表示中')).not.toBeInTheDocument()
     })
+  })
+
+  it('分析開始レスポンスに analysisId が無い場合はポーリングせずエラーにする', async () => {
+    const user = userEvent.setup()
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    apiMocks.startAnalysis.mockResolvedValue({
+      analysisId: '',
+      status: 'queued',
+      cached: false,
+    })
+
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: '分析を実行' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('分析開始レスポンスに analysisId がありません。')).toBeInTheDocument()
+    })
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'analysisId missing after startAnalysis',
+      expect.objectContaining({
+        analysisId: '',
+        status: 'queued',
+        cached: false,
+      }),
+    )
+    expect(apiMocks.fetchAnalysisStatus).not.toHaveBeenCalled()
   })
 
   it('running が続きすぎる場合はタイムアウトで停止する', async () => {

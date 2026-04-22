@@ -15,6 +15,14 @@ const directionSchema = z.enum(['positive', 'negative', 'neutral'])
 const signalSchema = z.enum(['BUY', 'WATCH', 'SELL', 'UNKNOWN'])
 const marketSchema = z.enum(['auto', 'JP', 'US'])
 const resolvedMarketSchema = z.enum(['JP', 'US'])
+const jobStatusSchema = z.enum(['queued', 'running', 'completed', 'error'])
+const analysisCreateResponseSchema = z.object({
+  analysisId: z.string().optional(),
+  id: z.string().optional(),
+  jobId: z.string().optional(),
+  status: jobStatusSchema,
+  cached: z.boolean(),
+})
 
 const analysisResultStorageSchema = z.object({
   analysisId: z.string(),
@@ -165,20 +173,53 @@ async function requestJson<T>(input: RequestInfo, init?: RequestInit): Promise<T
   return payload as T
 }
 
+function normalizeAnalysisCreateResponse(rawPayload: unknown): AnalysisCreateResponse {
+  const parsed = analysisCreateResponseSchema.safeParse(rawPayload)
+  if (!parsed.success) {
+    console.error('startAnalysis response schema mismatch', {
+      rawPayload,
+      issues: parsed.error.issues,
+    })
+    throw new ApiError('分析開始レスポンスの形式が不正です。', 500)
+  }
+
+  const analysisId = parsed.data.analysisId ?? parsed.data.id ?? parsed.data.jobId
+  if (!analysisId) {
+    console.error('analysisId missing in startAnalysis response', rawPayload)
+    throw new ApiError('分析開始レスポンスに analysisId がありません。', 500)
+  }
+
+  return {
+    analysisId,
+    status: parsed.data.status,
+    cached: parsed.data.cached,
+  }
+}
+
 export async function startAnalysis(
   payload: AnalysisRequestPayload,
 ): Promise<AnalysisCreateResponse> {
-  return requestJson<AnalysisCreateResponse>('/api/analyses', {
+  const rawResponse = await requestJson<unknown>('/api/analyses', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(payload),
   })
+
+  return normalizeAnalysisCreateResponse(rawResponse)
 }
 
 export async function fetchAnalysisStatus(
   analysisId: string,
 ): Promise<AnalysisStatusResponse> {
-  return requestJson<AnalysisStatusResponse>(`/api/analyses/${analysisId}`)
+  const normalizedAnalysisId = analysisId.trim()
+  if (!normalizedAnalysisId) {
+    throw new ApiError('分析状態の取得に必要な analysisId がありません。', 400)
+  }
+
+  const query = new URLSearchParams({ analysisId: normalizedAnalysisId })
+  return requestJson<AnalysisStatusResponse>(
+    `/api/analyses/${encodeURIComponent(normalizedAnalysisId)}?${query.toString()}`,
+  )
 }
 
 export async function fetchMarketPreview(
